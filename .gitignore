@@ -1,0 +1,8 @@
+# Bỏ qua các thư mục dataset nặng
+Dataset_Test/
+Dataset_Train/
+checkpoint-10000/
+
+# Bỏ qua các file hệ thống rác (nếu có)
+.DS_Store
+Thumbs.db
