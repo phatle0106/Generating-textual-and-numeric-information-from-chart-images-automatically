@@ -394,7 +394,12 @@ def draw_debug_image(
         cv2.putText(vis, f"L{idx}", (int(x), int(y) - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
 
     # Legend text boxes (from Task3 roles)
-    for idx, (text, (x, y, w, h)) in enumerate(legend_text_boxes):
+    for idx, box in enumerate(legend_text_boxes):
+        # box may be (text, (x,y,w,h)) or simply (x,y,w,h)
+        if isinstance(box, (list, tuple)) and len(box) == 2 and isinstance(box[1], (list, tuple)):
+            x, y, w, h = box[1]
+        else:
+            x, y, w, h = box
         cv2.rectangle(vis, (int(x), int(y)), (int(x + w), int(y + h)), (255, 0, 255), 2)
         cv2.putText(vis, f"T{idx}", (int(x), int(y) - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1, cv2.LINE_AA)
 

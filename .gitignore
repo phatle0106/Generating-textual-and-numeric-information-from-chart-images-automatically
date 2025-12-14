@@ -5,7 +5,9 @@ weights/checkpoint-10000/
 temp_uploads/
 DatasetPredict/
 __pycache__
-SubmissionFinalCode\__pycache__
+SubmissionFinalCode/__pycache__
 # Bỏ qua các file hệ thống rác (nếu có)
 .DS_Store
 Thumbs.db
+data_extraction_v8.py 
+debug_task2.py

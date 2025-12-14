@@ -3,11 +3,13 @@ import os
 import sys
 import shutil
 import time
+import traceback
 from pathlib import Path
 from typing import List
 import pandas as pd
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw
+import json
 
 # --- PATH CONFIGURATION ---
 BASE_DIR = Path(__file__).resolve().parent
@@ -147,9 +149,61 @@ def ensure_folders():
     (BASE_DIR / Config.Output_Json_Task_4).resolve().mkdir(parents=True, exist_ok=True)
 
 # --- PIPELINE LOGIC ---
+# --- HELPER FUNCTIONS ---
+def draw_ocr_boxes(image_path: Path, json_path: Path) -> Image.Image:
+    """Draws bounding boxes and text from Task 2 JSON onto the image."""
+    try:
+        image = Image.open(image_path).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        
+        # Load JSON data
+        # Load JSON data
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        # Navigate to text_blocks (root -> task2 -> output -> text_blocks)
+        text_blocks = []
+        if isinstance(data, dict):
+            if "task2" in data:
+                text_blocks = data["task2"].get("output", {}).get("text_blocks", [])
+            else:
+                # Try finding list in root or other common keys
+                text_blocks = data.get("text_blocks", [])
+        elif isinstance(data, list):
+             text_blocks = data
+
+        # Draw each polygon
+        for item in text_blocks:
+            poly = item.get("polygon")
+            text = item.get("text", "")
+            if poly:
+                # Polygon points: (x0,y0), (x1,y1), ...
+                points = [
+                    (poly["x0"], poly["y0"]),
+                    (poly["x1"], poly["y1"]),
+                    (poly["x2"], poly["y2"]),
+                    (poly["x3"], poly["y3"])
+                ]
+                
+                # Draw Box
+                draw.polygon(points, outline="red", width=2)
+                
+                # Draw Text (optional, can be messy if small)
+                # For now just box is cleaner, or maybe draw text above
+                # x_min = min(p[0] for p in points)
+                # y_min = min(p[1] for p in points)
+                # draw.text((x_min, y_min - 10), text, fill="red")
+                
+        return image
+    except Exception as e:
+        print(f"Error drawing OCR boxes: {e}")
+        return Image.open(image_path) # Fallback to original
+
 @st.cache_resource
 def load_pipeline_modules():
     """Load modules once to avoid reloading PyTorch models repeatedly."""
+
+
     try:
         import Task2 as t2
         import Task3 as t3
@@ -265,6 +319,7 @@ def run_extraction_pipeline():
         
     except Exception as e:
         st.error(f"Error during pipeline execution: {e}")
+        # print(traceback.format_exc())
 
 # --- UI COMPONENTS ---
 def render_sidebar():
@@ -336,8 +391,12 @@ def render_main_content():
                     st.dataframe(df, use_container_width=True)
                 else:
                     st.info("No data found.")
-             except:
-                 st.error("Error loading results.")
+             except Exception as e:
+                 st.error(f"Error loading results: {e}")
+                 if "No columns to parse" in str(e) or "EmptyDataError" in str(e):
+                     st.warning("No data extracted from images. Logic in Task 4 yielded no results.")
+                 else:
+                     st.error(f"Error loading results: {e}")
                  
         else:
             # 2. Modern View: Per-Image Results
@@ -357,10 +416,34 @@ def render_main_content():
                 with st.expander(f"Result: {stem}", expanded=True):
                     col_img, col_data = st.columns([1, 2])
                     
-                    # Show Image
+                    # Show Image with OCR Boxes
                     with col_img:
                         if stem in img_map:
-                            st.image(str(img_map[stem]), caption=str(img_map[stem].name), use_container_width=True)
+                            original_img_path = img_map[stem]
+                            
+                            # Locate the Task 2 JSON file
+                            # Task 2 output is in Config.Output_Json_Task_2
+                            # Filename usually matches stem + extension or just stem + .json
+                            # Based on Task2.py, it likely uses original filename + .json
+                            # Let's try to find it.
+                            task2_json_dir = (BASE_DIR / Config.Output_Json_Task_2).resolve()
+                            # Try exact match 
+                            # Possible naming: "image.png.json" or "image.json"
+                            # Task2 main loop: path.name -> save path / path.name (but with .json appended or replaced?)
+                            # Let's check Task2 save logic if needed, but usually it appends .json or replaces suffix.
+                            # Usually simple is: task2_json_dir / (original_img_path.name + ".json")
+                            
+                            json_candidate = task2_json_dir / (original_img_path.name + ".json")
+                            if not json_candidate.exists():
+                                 # Try replace suffix
+                                 json_candidate = task2_json_dir / (original_img_path.stem + ".json")
+                            
+                            if json_candidate.exists():
+                                annotated_image = draw_ocr_boxes(original_img_path, json_candidate)
+                                st.image(annotated_image, caption=f"{original_img_path.name} (OCR Visualization)", use_container_width=True)
+                            else:
+                                # Fallback to original if JSON missing
+                                st.image(str(original_img_path), caption=str(original_img_path.name), use_container_width=True)
                         else:
                             st.warning(f"Image source not found in uploads: {stem}")
                             
@@ -379,7 +462,10 @@ def render_main_content():
                                 key=f"dl_{stem}"
                             )
                         except Exception as e:
-                            st.error(f"Error loading CSV: {e}")
+                             if "No columns to parse" in str(e):
+                                 st.info("Empty value file (no chart data detected).")
+                             else:
+                                 st.error(f"Error loading CSV: {e}")
                             
             # Option to download ALL as ZIP could be added here later
     
