@@ -103,13 +103,16 @@ def load_icpr_bar_charts_flat(data_dir_images, data_dir_json, target_labels):
             except: pass
 
             img_name_base = os.path.splitext(file)[0]
-            png_path = os.path.join(img_dir, img_name_base + ".png")
-            jpg_path = os.path.join(img_dir, img_name_base + ".jpg")
+            # Check for various supported extensions
+            matched_path = None
+            for ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"]:
+                candidate = os.path.join(img_dir, img_name_base + ext)
+                if os.path.exists(candidate):
+                    matched_path = candidate
+                    break
             
-            if os.path.exists(png_path): 
-                image_path = png_path
-            elif os.path.exists(jpg_path): 
-                image_path = jpg_path
+            if matched_path:
+                image_path = matched_path
             else: 
                 continue
             

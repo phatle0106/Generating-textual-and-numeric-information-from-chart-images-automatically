@@ -666,14 +666,14 @@ def getYVal(IMG_DIR, JSON_DIR, objects_dectector, backbone):
 
     # Run inference
     image_paths = [p for p in img_dir.iterdir()
-                   if p.suffix.lower() in [".png", ".jpg", ".jpeg"]]
+                   if p.suffix.lower() in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"]]
     # results = run_inference(image_paths, predict_dir, objects_dectector)
 
     yValueDict = {}
 
     # 2. Loop xử lý từng ảnh
     for index, path in enumerate(image_paths):
-        if path.suffix.lower() not in [".png", ".jpg", ".jpeg"]:
+        if path.suffix.lower() not in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"]:
             continue
             
         # ===== THÊM ĐOẠN NÀY: Chạy predict cho TỪNG ẢNH =====
@@ -981,8 +981,36 @@ def main():
 
     # Đường dẫn file Excel (bạn đổi lại cho đúng folder trên Drive của bạn)
     excel_path = TASK4_CONFIG["output_excel"]
+    
+    # Tạo folder output nếu chưa có
+    output_dir = Path(excel_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Tạo subfolder cho individual results
+    individual_dir = output_dir / "individual_results"
+    individual_dir.mkdir(parents=True, exist_ok=True)
 
-    # Lưu ra Excel
+    # Lưu ra Excel tổng
     df.to_csv(excel_path, index=False, encoding='utf-8-sig')
-
-    print("Đã lưu kết quả vào:", excel_path)
+    print("Đã lưu kết quả tổng hợp vào:", excel_path)
+    
+    # Lưu từng file lẻ
+    print(f"Lưu các file riêng lẻ vào: {individual_dir}")
+    for img_name, legends_dict in yValueDict.items():
+        img_rows = []
+        for legend, xdict in legends_dict.items():
+             for x_label, val in xdict.items():
+                img_rows.append({
+                    "image": img_name,
+                    "legend": legend,
+                    "x_label": x_label,
+                    "value": val
+                })
+        
+        if img_rows:
+            sub_df = pd.DataFrame(img_rows)
+            # Clean filename safe
+            safe_name = Path(img_name).stem
+            sub_csv_path = individual_dir / f"{safe_name}.csv"
+            sub_df.to_csv(sub_csv_path, index=False, encoding='utf-8-sig')
+            print(f"  -> {sub_csv_path.name}")

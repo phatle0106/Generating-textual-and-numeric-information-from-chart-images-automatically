@@ -1,8 +1,11 @@
 # Bỏ qua các thư mục dataset nặng
 Dataset_Test/
 Dataset_Train/
-checkpoint-10000/
-
+weights/checkpoint-10000/
+temp_uploads/
+DatasetPredict/
+__pycache__
+SubmissionFinalCode\__pycache__
 # Bỏ qua các file hệ thống rác (nếu có)
 .DS_Store
 Thumbs.db
