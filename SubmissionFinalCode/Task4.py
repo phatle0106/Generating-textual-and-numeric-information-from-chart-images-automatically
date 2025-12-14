@@ -15,6 +15,8 @@ from PIL import Image
 from timm.data import resolve_model_data_config
 from timm.data.transforms_factory import create_transform
 from ultralytics import YOLO
+from scipy.optimize import linear_sum_assignment
+import torch.nn as nn
 
 import Config
 
@@ -115,6 +117,7 @@ def get_probable_labels(image, doc, xaxis, yaxis):
         dist_to_x = point_line_distance(cx, cy, x1, y1, x2, y2)
         dist_to_y = point_line_distance(cx, cy, yx1, yy1, yx2, yy2)
         if dist_to_y < dist_to_x:
+            y_title.append((text, (tx, ty, w, h)))
             y_title.append((text, (tx, ty, w, h)))
         else:
             x_title.append(text)
@@ -297,7 +300,61 @@ def get_backbone(model_type: str, device: str | None = None):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if model_type == "resnet50":
-        model_name = "resnet50"
+        base_model = timm.create_model(
+            "resnet50",
+            pretrained=True,
+            features_only=True,
+            out_indices=(1,)   # stage 2 (0-based) => nhạy low/mid hơn layer sâu
+        )
+        model = FeatureMapMeanPool(base_model)
+        data_config = resolve_model_data_config(base_model)
+
+    # -----------------------------
+    # EFFICIENTNET (option A: embedding cuối)
+    # -----------------------------
+    elif model_type == "efficientnet_b0":
+        model = timm.create_model(
+            "efficientnet_b0",
+            pretrained=True,
+            num_classes=0       # trả về embedding vector (global pooled)
+        )
+        data_config = resolve_model_data_config(model)
+
+    elif model_type == "efficientnet_b1":
+        model = timm.create_model(
+            "efficientnet_b1",
+            pretrained=True,
+            num_classes=0
+        )
+        data_config = resolve_model_data_config(model)
+
+    # -----------------------------
+    # EFFICIENTNET (option B: feature map tầng giữa)
+    # Bạn gọi bằng model_type = "efficientnet_b0_mid"
+    # -----------------------------
+    elif model_type == "efficientnet_b0_mid":
+        base_model = timm.create_model(
+            "efficientnet_b0",
+            pretrained=True,
+            features_only=True,
+            out_indices=(2,)    # thử (1,) hoặc (2,) tùy bạn muốn nông/sâu
+        )
+        model = FeatureMapMeanPool(base_model)
+        data_config = resolve_model_data_config(base_model)
+
+    elif model_type == "efficientnet_b1_mid":
+        base_model = timm.create_model(
+            "efficientnet_b1",
+            pretrained=True,
+            features_only=True,
+            out_indices=(2,)
+        )
+        model = FeatureMapMeanPool(base_model)
+        data_config = resolve_model_data_config(base_model)
+
+    # -----------------------------
+    # CÁC MODEL KHÁC
+    # -----------------------------
     elif model_type == "clip_vitb32":
         model_name = "vit_base_patch32_clip_224.openai"
     elif model_type == "swin_tiny":
@@ -338,6 +395,7 @@ def extract_patch_embedding(image, bbox, backbone, kind: str = "generic", legend
     y1 = max(0, min(y1, H - 1))
     y2 = max(0, min(y2, H))
     if x2 <= x1 or y2 <= y1:
+        raise ValueError(f"Invalid bbox after preprocessing: {(x1, y1, x2, y2)} for image size {(W, H)}")
         raise ValueError(f"Invalid bbox after preprocessing: {(x1, y1, x2, y2)} for image size {(W, H)}")
 
     patch = image_pil.crop((x1, y1, x2, y2))

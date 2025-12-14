@@ -166,6 +166,71 @@ def load_icpr_bar_charts_flat(data_dir_images, data_dir_json, target_labels):
     return dataset_dicts
 
 # ==========================================
+# 5. HÀM VISUALIZE
+# ==========================================
+def visualize_result(image_path, original_blocks, predicted_roles_map, output_path):
+    """
+    Vẽ bbox và label lên ảnh gốc và lưu lại.
+    """
+    try:
+        image = Image.open(image_path).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        
+        # Load font (nếu lỗi font path thì dùng default)
+        try:
+            font = ImageFont.truetype("arial.ttf", 20)
+        except:
+            font = ImageFont.load_default()
+
+        # Định nghĩa màu cho các nhãn (Bạn có thể tùy chỉnh theo list label của mình)
+        # Format: (R, G, B)
+        colors = {
+            "chart_title": (255, 0, 0),      # Đỏ
+            "axis_title": (0, 0, 255),       # Xanh dương
+            "tick_label": (0, 128, 0),       # Xanh lá
+            "legend_label": (255, 165, 0),   # Cam
+            "legend_title": (255, 20, 147),  # Hồng đậm
+            "mark_label": (128, 0, 128),     # Tím
+            "value_label": (0, 255, 255),    # Cyan
+            "other": (192, 192, 192)         # Xám
+        }
+        
+        for i, block in enumerate(original_blocks):
+            # Lấy role đã dự đoán, nếu không có thì là 'other'
+            role = predicted_roles_map.get(i, "other").lower()
+            color = colors.get(role, (0, 0, 0)) # Mặc định đen nếu không tìm thấy màu
+            
+            # Lấy tọa độ polygon để vẽ
+            poly = block.get("polygon")
+            xy_coords = []
+            
+            if isinstance(poly, dict):
+                xy_coords = [(poly["x0"], poly["y0"]), (poly["x1"], poly["y1"]), 
+                             (poly["x2"], poly["y2"]), (poly["x3"], poly["y3"])]
+            elif isinstance(poly, list):
+                # Xử lý list [x0, y0, x1, y1...]
+                xy_coords = list(zip(poly[0::2], poly[1::2]))
+            
+            if xy_coords:
+                # 1. Vẽ khung (Polygon)
+                draw.polygon(xy_coords, outline=color, width=3)
+                
+                # 2. Vẽ nền cho text label (để dễ đọc)
+                x_min = min([p[0] for p in xy_coords])
+                y_min = min([p[1] for p in xy_coords])
+                
+                # Vẽ text label nhỏ phía trên box
+                text_bbox = draw.textbbox((x_min, y_min), role, font=font)
+                draw.rectangle(text_bbox, fill=color)
+                draw.text((x_min, y_min), role, fill="white", font=font)
+
+        # Lưu ảnh
+        image.save(output_path)
+        
+    except Exception as e:
+        print(f"Lỗi khi visualize {image_path}: {str(e)}")
+
+# ==========================================
 # 4. MAIN
 # ==========================================
 def main():
@@ -180,10 +245,16 @@ def main():
     model.to(TEST_CONFIG["device"])
     model.eval()
 
-    # 2. Tạo thư mục output
+    # 2. Tạo thư mục output JSON
     if not os.path.exists(TEST_CONFIG["output_dir"]):
         os.makedirs(TEST_CONFIG["output_dir"])
-        print(f"Đã tạo thư mục output: {TEST_CONFIG['output_dir']}")
+    
+    # --- MỚI THÊM: Tạo thư mục chứa ảnh visualize ---
+    vis_dir = os.path.join(TEST_CONFIG["output_dir"], "visualization")
+    if not os.path.exists(vis_dir):
+        os.makedirs(vis_dir)
+        print(f"Đã tạo thư mục visualization: {vis_dir}")
+    # ------------------------------------------------
 
     # 3. Load Data
     test_data = load_icpr_bar_charts_flat(TEST_CONFIG["data_dir_images"], TEST_CONFIG["data_dir_json"], TEST_CONFIG["labels"])
@@ -193,7 +264,7 @@ def main():
 
     id2label = {i: label for i, label in enumerate(TEST_CONFIG["labels"])}
     
-    print(f"Bắt đầu xử lý và lưu file JSON riêng lẻ vào {TEST_CONFIG['output_dir']}...")
+    print(f"Bắt đầu xử lý...")
     
     for item in tqdm(test_data, desc="Processing"):
         image = Image.open(item["image_path"]).convert("RGB")
@@ -216,6 +287,7 @@ def main():
         word_ids = encoding.word_ids()
         predicted_roles_map = {}
         
+        # Map prediction về từng word index gốc
         for idx, word_idx in enumerate(word_ids):
             if word_idx is not None:
                 if word_idx not in predicted_roles_map:
@@ -227,31 +299,37 @@ def main():
         
         for i, block in enumerate(original_blocks):
             role = predicted_roles_map.get(i, "other").lower()
-            
             text_roles_output.append({
                 "id": block["id"],
                 "role": role
             })
 
+        # --- Lưu JSON ---
         final_json = {
             "task3": {
                 "input": {
-                    "task1_output": {
-                        "chart_type": item["chart_type"]
-                    },
-                    "task2_output": {
-                        "text_blocks": original_blocks
-                    }
+                    "task1_output": {"chart_type": item["chart_type"]},
+                    "task2_output": {"text_blocks": original_blocks}
                 },
-                "output": {
-                    "text_roles": text_roles_output
-                }
+                "output": {"text_roles": text_roles_output}
             }
         }
 
         output_path = os.path.join(TEST_CONFIG["output_dir"], item["id"])
-        
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(final_json, f, indent=4, ensure_ascii=False)
 
-    print("Hoàn tất! Kiểm tra thư mục output_results.")
+        # --- MỚI THÊM: GỌI HÀM VISUALIZE ---
+        # Tạo tên file ảnh output (ví dụ: image_name_vis.png)
+        vis_filename = os.path.splitext(item["id"])[0] + "_vis.png"
+        vis_path = os.path.join(vis_dir, vis_filename)
+        
+        visualize_result(
+            image_path=item["image_path"],
+            original_blocks=original_blocks,
+            predicted_roles_map=predicted_roles_map,
+            output_path=vis_path
+        )
+        # -----------------------------------
+
+    print("Hoàn tất! Kiểm tra thư mục output_results và output_results/visualization.")

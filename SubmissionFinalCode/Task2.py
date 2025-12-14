@@ -1,26 +1,370 @@
+# import torch
+# import os
+# import json
+# import logging
+# import paddle
+# from paddleocr import PaddleOCR
+# import cv2
+# import numpy as np
+# import Config
+
+# # ==========================================
+# # 1. CẤU HÌNH ĐƯỜNG DẪN
+# # ==========================================
+
+# Task_2_config = Config.returnTestTask2_Config()
+
+# INPUT_IMG_DIR = Task_2_config["input_images"] 
+# INPUT_JSON_DIR = Task_2_config["input_json"] 
+# OUTPUT_DIR = Task_2_config["output"] 
+
+# # Các đuôi ảnh hỗ trợ
+# VALID_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif")
+
+# # Tắt log rác của Paddle
+# logging.getLogger("ppocr").setLevel(logging.WARNING)
+
+# # ==========================================
+# # 2. CÁC HÀM TIỆN ÍCH (CẮT & XOAY ẢNH)
+# # ==========================================
+
+# def parse_polygon_from_dict(poly_dict):
+#     """Chuyển đổi dict {x0, y0...} sang numpy array"""
+#     return np.array([
+#         [poly_dict["x0"], poly_dict["y0"]],
+#         [poly_dict["x1"], poly_dict["y1"]],
+#         [poly_dict["x2"], poly_dict["y2"]],
+#         [poly_dict["x3"], poly_dict["y3"]]
+#     ], dtype=np.float32)
+
+# def sorted_boxes(dt_boxes):
+#     """
+#     [FIX] Hàm này bị thiếu trong code của bạn.
+#     Sắp xếp lại thứ tự 4 điểm: TL, TR, BR, BL
+#     """
+#     num_points = dt_boxes.shape[0]
+#     sorted_points = sorted(dt_boxes, key=lambda x: x[0])
+#     left_points = sorted_points[:2]
+#     right_points = sorted_points[2:]
+
+#     if left_points[0][1] < left_points[1][1]:
+#         tl = left_points[0]
+#         bl = left_points[1]
+#     else:
+#         tl = left_points[1]
+#         bl = left_points[0]
+
+#     if right_points[0][1] < right_points[1][1]:
+#         tr = right_points[0]
+#         br = right_points[1]
+#     else:
+#         tr = right_points[1]
+#         br = right_points[0]
+    
+#     return np.array([tl, tr, br, bl], dtype=np.float32)
+
+# def get_rotate_crop_image(img, points):
+#     """Cắt và xoay ảnh theo 4 điểm (fix nghiêng)"""
+#     # Tính chiều rộng và cao của box mới
+#     width_top = np.linalg.norm(points[0] - points[1])
+#     width_bottom = np.linalg.norm(points[2] - points[3])
+#     max_width = int(max(width_top, width_bottom))
+
+#     height_left = np.linalg.norm(points[0] - points[3])
+#     height_right = np.linalg.norm(points[1] - points[2])
+#     max_height = int(max(height_left, height_right))
+
+#     # Điểm đích
+#     dst_pts = np.array([
+#         [0, 0],
+#         [max_width - 1, 0],
+#         [max_width - 1, max_height - 1],
+#         [0, max_height - 1]
+#     ], dtype=np.float32)
+
+#     # Biến đổi và cắt
+#     M = cv2.getPerspectiveTransform(points, dst_pts)
+#     dst_img = cv2.warpPerspective(img, M, (max_width, max_height))
+#     return dst_img
+
+# def read_image_windows(path):
+#     """Đọc ảnh hỗ trợ đường dẫn tiếng Việt/Unicode"""
+#     if not os.path.exists(path):
+#         print(f"  [ERR] File không tồn tại: {path}")
+#         return None
+#     try:
+#         stream = np.fromfile(path, dtype=np.uint8)
+#         img_bgr = cv2.imdecode(stream, cv2.IMREAD_COLOR)
+#         if img_bgr is None: return None
+#         return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+#     except Exception as e:
+#         print(f"  [ERR] Lỗi đọc ảnh: {e}")
+#         return None
+
+# def expand_polygon(points, img_height, img_width, scale_ratio=1.1):
+#     """Nới rộng polygon từ tâm ra các phía."""
+#     center = np.mean(points, axis=0)
+#     vectors = points - center
+#     expanded_points = center + vectors * scale_ratio
+    
+#     # Clip tọa độ
+#     expanded_points[:, 0] = np.clip(expanded_points[:, 0], 0, img_width - 1)
+#     expanded_points[:, 1] = np.clip(expanded_points[:, 1], 0, img_height - 1)
+    
+#     return expanded_points.astype(np.float32)
+
+# # ==========================================
+# # 3. KHỞI TẠO MODEL
+# # ==========================================
+# def init_model():
+#     print("--- Đang khởi tạo Model PaddleOCR ---")
+#     try:
+#         if paddle.is_compiled_with_cuda():
+#             paddle.device.set_device("gpu")
+#             print(" -> [OK] Đã kích hoạt chế độ GPU.")
+#         else:
+#             paddle.device.set_device("cpu")
+#             print(" -> [WARN] Chạy trên CPU.")
+#     except Exception:
+#         pass
+
+#     model = PaddleOCR(
+#         lang="en",
+#         use_textline_orientation=True,
+#         use_doc_orientation_classify=False,
+#         use_doc_unwarping=False,
+#     )
+#     return model
+
+# # ==========================================
+# # 4. XỬ LÝ CHÍNH
+# # ==========================================
+# def process_single_image_yolo(ocr_model, img_path, json_path):
+#     img = read_image_windows(img_path)
+#     if img is None: return [], None
+
+#     if not os.path.exists(json_path):
+#         return [], img
+    
+#     try:
+#         with open(json_path, "r", encoding="utf-8") as f:
+#             data = json.load(f)
+#     except Exception:
+#         return [], img
+
+#     if "task2" not in data or "output" not in data["task2"]:
+#         return [], img
+    
+#     input_blocks = data["task2"]["output"]["text_blocks"]
+#     final_blocks = []
+
+#     img_h, img_w = img.shape[:2]
+
+#     # Tạo folder debug để kiểm tra xem model nhìn thấy gì (Quan trọng)
+#     debug_dir = "debug_crops"
+#     if not os.path.exists(debug_dir): os.makedirs(debug_dir)
+
+#     for idx, block in enumerate(input_blocks):
+#         try:
+#             poly_dict = block["polygon"]
+#             poly_points = parse_polygon_from_dict(poly_dict)
+
+#             # ---------------------------------------------------------
+#             # CHECK 1: Kiểm tra xem tọa độ có bị chuẩn hóa (0.0 - 1.0) không?
+#             # Nếu tọa độ toàn < 1.0 nghĩa là đang sai hệ quy chiếu
+#             if np.max(poly_points) <= 1.5: 
+#                 print(f"[WARN] Tọa độ có vẻ là Normalized. Đang scale lại theo ảnh {img_w}x{img_h}")
+#                 poly_points[:, 0] *= img_w
+#                 poly_points[:, 1] *= img_h
+#             # ---------------------------------------------------------
+
+#             # 1. Nới rộng box (Box Dilation) - Giữ mức 1.1 là an toàn
+#             poly_points = expand_polygon(poly_points, img_h, img_w, scale_ratio=1.1)
+            
+#             # 2. Sắp xếp điểm
+#             poly_points = sorted_boxes(poly_points)
+            
+#             # 3. Cắt ảnh
+#             crop_img = get_rotate_crop_image(img, poly_points)
+
+#             if crop_img is None or crop_img.shape[0] < 4 or crop_img.shape[1] < 4:
+#                 final_blocks.append(block)
+#                 continue
+
+#             # C. Lưu ảnh ra để debug (Xóa dòng này khi đã chạy ngon)
+#             cv2.imwrite(f"{debug_dir}/crop_{idx}.jpg", cv2.cvtColor(crop_img, cv2.COLOR_RGB2BGR))
+
+#             # 4. Gọi OCR
+#             crop_bgr = cv2.cvtColor(crop_img, cv2.COLOR_RGB2BGR)
+#             rec_results = ocr_model.ocr(crop_bgr)
+
+#             rec_text = ""
+#             rec_score = 0.0
+
+#             if rec_results and isinstance(rec_results, list) and len(rec_results) > 0:
+#                 # Lấy khối kết quả đầu tiên (là một list chứa các kết quả từng dòng)
+#                 first_result = rec_results[0]
+                
+#                 # PaddleOCR trả về một list chứa các cặp [tọa độ, (text, score)]
+#                 if isinstance(first_result, list):
+                    
+#                     all_text = []
+#                     max_score = 0.0
+                    
+#                     for item in first_result:
+#                         # item là một list, ví dụ: [ [1, 1], [1, 8], ('9', 0.4278) ]
+#                         # Lấy phần tử cuối cùng, là tuple ('Text', Score)
+#                         if isinstance(item, list) and len(item) > 1 and isinstance(item[-1], tuple):
+#                             text, score = item[-1]
+                            
+#                             # Gom text lại
+#                             all_text.append(text)
+                            
+#                             # Cập nhật score cao nhất
+#                             score = float(score)
+#                             if score > max_score:
+#                                 max_score = score
+                                
+#                     # Gán kết quả cuối cùng
+#                     rec_text = " ".join(all_text)
+#                     rec_score = max_score
+
+#             # print(rec_results)
+
+#             # In ra màn hình để xem nó có đọc được không
+#             # print(f" - Block {idx}: '{rec_text}' ({rec_score:.2f})")
+
+#             new_block = block.copy()
+#             new_block["text"] = rec_text
+#             new_block["score"] = round(float(rec_score), 4)
+#             final_blocks.append(new_block)
+
+#         except Exception as e:
+#             print(f"Lỗi block {idx}: {e}")
+#             final_blocks.append(block)
+
+#     return final_blocks, img
+
+# # ==========================================
+# # 5. VISUALIZATION & SAVE
+# # ==========================================
+
+# def visualize_and_save(img_rgb, blocks, filename, output_dir):
+#     if img_rgb is None or not blocks: return
+#     vis_img = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+#     for b in blocks:
+#         poly = b["polygon"]
+#         pts = np.array([
+#             [poly["x0"], poly["y0"]], [poly["x1"], poly["y1"]],
+#             [poly["x2"], poly["y2"]], [poly["x3"], poly["y3"]]
+#         ], np.int32).reshape((-1, 1, 2))
+        
+#         cv2.polylines(vis_img, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
+        
+#         if b.get("text"):
+#             # Lưu ý: cv2.putText không hỗ trợ tiếng Việt có dấu
+#             cv2.putText(vis_img, b["text"], (pts[0][0][0], pts[0][0][1] - 5), 
+#                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+#     save_path = os.path.join(output_dir, filename)
+#     cv2.imwrite(save_path, vis_img)
+
+# def save_json(data, output_path):
+#     final_output = {
+#         "task2": {
+#             "input": {"task1_output": {"chart_type": "vertical bar"}},
+#             "name": "Text Detection and Recognition",
+#             "output": {"text_blocks": data},
+#         }
+#     }
+#     with open(output_path, "w", encoding="utf-8") as f:
+#         json.dump(final_output, f, ensure_ascii=False, indent=4)
+
+# # ==========================================
+# # 6. MAIN
+# # ==========================================
+# def main():
+#     if not os.path.exists(INPUT_IMG_DIR):
+#         print(f"[LỖI] Thư mục ảnh không tồn tại: {INPUT_IMG_DIR}")
+#         return
+#     if not os.path.exists(INPUT_JSON_DIR):
+#         print(f"[LỖI] Thư mục JSON YOLO không tồn tại: {INPUT_JSON_DIR}")
+#         return
+
+#     vis_output_dir = os.path.join(OUTPUT_DIR, "visualize_images")
+#     if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
+#     if not os.path.exists(vis_output_dir): os.makedirs(vis_output_dir)
+
+#     ocr = init_model()
+
+#     files = [f for f in os.listdir(INPUT_IMG_DIR) if f.lower().endswith(VALID_EXTENSIONS)]
+#     total = len(files)
+
+#     print(f"\nTìm thấy {total} ảnh.")
+#     print("-" * 50)
+
+#     for idx, filename in enumerate(files):
+#         img_path = os.path.join(INPUT_IMG_DIR, filename)
+        
+#         json_name = os.path.splitext(filename)[0] + ".json"
+#         json_input_path = os.path.join(INPUT_JSON_DIR, json_name)
+#         json_output_path = os.path.join(OUTPUT_DIR, json_name)
+
+#         print(f"[{idx + 1}/{total}] Đang xử lý: {filename}")
+
+#         blocks, img_rgb = process_single_image_yolo(ocr, img_path, json_input_path)
+        
+#         if blocks:
+#             save_json(blocks, json_output_path)
+
+#         if img_rgb is not None and len(blocks) > 0:
+#             visualize_and_save(img_rgb, blocks, filename, vis_output_dir)
+
+#     print("-" * 50)
+#     print("Hoàn tất.")
+#     print(f"File JSON kết quả tại: {OUTPUT_DIR}")
+#     print(f"Ảnh Visualize tại: {vis_output_dir}")
+
+# -*- coding: utf-8 -*-
+"""
+Task2 (YOLO -> PaddleOCR 3.x Recognition-only)
+
+- Input: Ảnh + JSON từ YOLO (task2/output/text_blocks với polygon x0..y3)
+- Output: JSON bổ sung text + score cho từng block + ảnh visualize + debug crops
+
+Lưu ý quan trọng (PaddleOCR 3.x):
+- PaddleOCR.ocr() không còn tham số det/rec. Nếu bạn muốn recognition-only sau YOLO,
+  hãy dùng module TextRecognition (và TextLineOrientationClassification nếu cần).
+"""
+
 import os
 import json
 import logging
+
+import cv2
+import numpy as np
 import paddle
-from paddleocr import PaddleOCR
+
 import Config
 import cv2
 import numpy as np
 from ultralytics import YOLO
 
 # ==========================================
-# 1. CẤU HÌNH
+# 1. CẤU HÌNH ĐƯỜNG DẪN
 # ==========================================
 Task2_Config = Config.returnTestTask2_Config()
 VALID_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif")
 YOLO_TEXT_WEIGHT = "./weights/best_det.pt"
 PAD_EXPAND_PX = 4  # expand detector boxes a bit for recognition
 
+# Tắt log rác của PaddleOCR
 logging.getLogger("ppocr").setLevel(logging.WARNING)
 
 
+
 # ==========================================
-# 2. ĐỊNH NGHĨA MODEL
+# 2. THAM SỐ TIỀN XỬ LÝ CROP (khuyến nghị bật)
 # ==========================================
 
 def init_model():
@@ -67,13 +411,12 @@ def read_image_windows(path):
         img_bgr = cv2.imdecode(stream, cv2.IMREAD_COLOR)
 
         if img_bgr is None:
-            print(f"  [ERR] OpenCV không giải mã được file (Lỗi định dạng ảnh): {path}")
             return None
 
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         return img_rgb
     except Exception as e:
-        print(f"  [ERR] Ngoại lệ khi đọc ảnh: {e}")
+        print(f"  [ERR] Lỗi đọc ảnh: {e}")
         return None
 
 
@@ -490,6 +833,7 @@ def save_json(data, output_path):
     final_output = {
         "task2": {
             "input": {"task1_output": {"chart_type": "vertical bar"}},
+            "input": {"task1_output": {"chart_type": "vertical bar"}},
             "name": "Text Detection and Recognition",
             "output": {"text_blocks": data},
         }
@@ -499,9 +843,11 @@ def save_json(data, output_path):
         json.dump(final_output, f, ensure_ascii=False, indent=4)
 
 
+
 # ==========================================
 # 6. MAIN (Dùng để test độc lập nếu cần)
 # ==========================================
+
 
 def main():
     if not os.path.exists(Task2_Config["output"]):
@@ -537,3 +883,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

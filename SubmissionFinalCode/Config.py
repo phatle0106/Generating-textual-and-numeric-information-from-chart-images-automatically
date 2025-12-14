@@ -9,7 +9,8 @@ model_path_layoutlmv3 = "./weights/checkpoint-10000"    # Đường dẫn file c
 model_path_yolo = "./weights/best.pt"           # Đường dẫn file checkpoint yolo
 
 Task2Config = {
-    "input": Dataset_Image,
+    "input_json": Output_Json_Task_2_1,
+    "input_images": Dataset_Image,
     "output": Output_Json_Task_2
 }
 
@@ -30,6 +31,9 @@ Task4Config = {
     "yolo_weight": model_path_yolo,
     "device": "cuda"
 }
+
+def returnTestTask2_1_Config():
+    return Task2_1Config
 
 def returnTestTask2_Config():
     return Task2Config
