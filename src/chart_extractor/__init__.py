@@ -1,0 +1,6 @@
+"""Chart extractor package."""
+
+from chart_extractor.config.settings import get_settings
+
+__all__ = ["get_settings"]
+
