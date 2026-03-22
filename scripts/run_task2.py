@@ -8,9 +8,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from chart_extractor.pipeline.orchestrator import run_pipeline
+from chart_extractor.pipeline.orchestrator import run_task2
 
 
 if __name__ == "__main__":
-    run_pipeline()
+    run_task2()
 
