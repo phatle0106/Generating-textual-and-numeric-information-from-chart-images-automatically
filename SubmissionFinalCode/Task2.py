@@ -23,20 +23,59 @@ logging.getLogger("ppocr").setLevel(logging.WARNING)
 # 2. ĐỊNH NGHĨA MODEL
 # ==========================================
 
-def init_model():
-    """Load YOLO OBB detector + PaddleOCR recognizer-only."""
-    print("--- Khởi tạo YOLOv8-OBB text detector + PaddleOCR recognizer ---")
-    try:
-        if paddle.is_compiled_with_cuda():
-            paddle.device.set_device("gpu")
-            print(" -> [OK] Paddle GPU.")
-        else:
-            paddle.device.set_device("cpu")
-            print(" -> [WARN] Paddle CPU.")
-    except Exception:
-        pass
+def init_model(device: str = "auto"):
+    """
+    Load YOLO OBB detector + PaddleOCR recognizer-only.
+    device: "auto" (default), "cpu", or "gpu".
+    """
+    dev_choice = device.lower()
+    if dev_choice not in ("auto", "cpu", "gpu"):
+        dev_choice = "auto"
 
-    detector = YOLO(YOLO_TEXT_WEIGHT)
+    print(f"--- Khởi tạo YOLOv8-OBB text detector + PaddleOCR (device={dev_choice}) ---")
+    paddle_use_gpu = False
+    try:
+        if dev_choice == "gpu" and paddle.is_compiled_with_cuda():
+            paddle.device.set_device("gpu")
+            paddle_use_gpu = True
+            print(" -> [OK] Paddle GPU.")
+        elif dev_choice == "cpu":
+            paddle.device.set_device("cpu")
+            print(" -> [WARN] Paddle forced to CPU.")
+        elif dev_choice == "auto":
+            if paddle.is_compiled_with_cuda():
+                paddle.device.set_device("gpu")
+                paddle_use_gpu = True
+                print(" -> [OK] Paddle GPU (auto).")
+            else:
+                paddle.device.set_device("cpu")
+                print(" -> [WARN] Paddle CPU (auto).")
+    except Exception as e:
+        print(f" -> [WARN] Paddle device init fallback to CPU: {e}")
+        try:
+            paddle.device.set_device("cpu")
+        except Exception:
+            pass
+        paddle_use_gpu = False
+
+    # Ultralytics hub check can be slow/fail offline; disable if not set.
+    os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "1")
+
+    # Map to torch-style device strings for YOLO
+    torch_device = None
+    if dev_choice == "gpu":
+        torch_device = "cuda"
+    elif dev_choice == "cpu":
+        torch_device = "cpu"
+
+    detector = YOLO(YOLO_TEXT_WEIGHT, task=None)
+    if torch_device:
+        try:
+            detector.to(torch_device)
+            print(f" -> [OK] YOLO to {torch_device}")
+        except Exception as e:
+            print(f" -> [WARN] YOLO device move failed ({torch_device}), staying default: {e}")
+    # PaddleOCR will follow paddle.device settings; do not pass unsupported use_gpu
     recognizer = PaddleOCR(
         lang="en",
         use_angle_cls=True,
@@ -504,10 +543,12 @@ def save_json(data, output_path):
 # ==========================================
 
 def main():
+    # Allow overriding device via env (TASK2_DEVICE) to avoid GPU crashes
+    device_env = os.environ.get("TASK2_DEVICE", "auto")
     if not os.path.exists(Task2_Config["output"]):
         os.makedirs(Task2_Config["output"])
 
-    ocr = init_model()
+    ocr = init_model(device=device_env)
 
     files = [
         f

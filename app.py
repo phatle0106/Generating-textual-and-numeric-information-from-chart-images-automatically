@@ -218,9 +218,10 @@ def load_pipeline_modules():
         if not hasattr(t2, "_app_cached_ocr"):
              t2._app_cached_ocr = None
              
-        def init_model_cached():
+        def init_model_cached(*args, **kwargs):
+             # accept arbitrary args/kwargs (e.g., device=...) but cache a single instance
              if t2._app_cached_ocr is None:
-                 t2._app_cached_ocr = t2.original_init_model()
+                 t2._app_cached_ocr = t2.original_init_model(*args, **kwargs)
              return t2._app_cached_ocr
              
         t2.init_model = init_model_cached
