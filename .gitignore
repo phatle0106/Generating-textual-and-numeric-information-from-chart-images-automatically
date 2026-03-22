@@ -1,19 +1,42 @@
-# Bỏ qua các thư mục dataset nặng
+# Datasets and generated artifacts
 Dataset_Test/
 Dataset_Train/
-weights/checkpoint-10000/
-temp_uploads/
 DatasetPredict/
-__pycache__
-SubmissionFinalCode/__pycache__
-# Bỏ qua các file hệ thống rác (nếu có)
-.DS_Store
-Thumbs.db
-data_extraction_v8.py 
-debug_task2.py
 dataset_5_task/
 dataset_full_task/
 chart_yolo_v3/
+temp_uploads/
+runs/
+
+# Model checkpoints
+weights/checkpoint-10000/
+
+# Python cache/build
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Legacy local scripts not tracked in the refactor
+data_extraction_v8.py
+debug_task2.py
 eval_task2.py
 eval_task3.py
 eval_task456.py
+
